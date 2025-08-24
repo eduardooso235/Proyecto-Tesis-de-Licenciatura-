@@ -1,0 +1,108 @@
+%% 2) Cargar datos (opción CSV)
+% Estructura esperada del CSV: date,pi,yhat,d_er,i
+% "date" como cadena 'YYYY-MM' o 'YYYYMmm'; ajusta parsing si difiere
+T = readtable(data_csv);
+
+% Normalizar/parsear fechas si es necesario:
+% Si 'date' viene como '2019-01', usa:
+if ~isdatetime(T.date)
+    try
+        T.date = datetime(T.date, 'InputFormat','yyyy-MM'); % ajusta si tu formato difiere
+    catch
+        % Ejemplo alterno: '2019m1'
+        T.date = datetime(regexprep(string(T.date),'m','-'), 'InputFormat','yyyy-M');
+    end
+end
+
+% Ordenar por fecha por seguridad
+T = sortrows(T,'date');
+
+% Filtrar rango muestral: 2019m1 -- 2023m12
+t0 = datetime(2019,1,1);
+t1 = datetime(2023,12,1);
+idx = (T.date>=t0 & T.date<=t1);
+T   = T(idx,:);
+
+% Construir matriz Y en el orden requerido por BEAR
+% Endógenas: pi, yhat, d_er, i  (en columnas)
+Y = [T.pi, T.yhat, T.d_er, T.i];
+
+% Nombres de variables
+varnames = {'pi','yhat','d_er','i'};
+
+% Frecuencia (mensual = 12)
+freq = 12;
+
+%% 3) Especificaciones (specs) para correr sin GUI
+% BEAR permite pasar un struct "specs" a la función principal.
+% Los nombres de campos son los típicos de BEAR v5 para VAR-Bayesian.
+
+specs = struct();
+
+% Datos y básicos
+specs.modeltype   = 'VAR';     % Tipo de modelo
+specs.frequency   = freq;      % 12 mensual, 4 trimestral, etc.
+specs.varendo     = varnames;  % celdas con nombres endógenos
+specs.varexo      = {};        % sin exógenas
+specs.const       = 1;         % incluir constante (1 sí, 0 no)
+specs.nlag        = 4;         % rezagos
+
+% Muestra (opcional pero útil para etiquetas)
+specs.startdate   = '2019-01'; % cadena legible por BEAR para etiquetas
+specs.enddate     = '2023-12';
+
+% Identificación estructural / IRFs
+specs.IRFt        = 2;         % 2 = Cholesky
+specs.Fcomp       = 1;         % construir F companion (suele ser default)
+specs.IRFperiods  = 20;        % horizontes IRF (ajusta a gusto)
+specs.FEVperiods  = 20;        % horizontes FEVD (ajusta a gusto)
+
+% Prior bayesiano
+% En BEAR v5, para BVAR:
+% prior = 1 Minnesota, 2 Normal-Wishart, 3 Indep. Normal-Wishart, etc. (*puede variar*)
+specs.prior       = 2;         % Normal-Wishart
+% Hiperparámetros
+specs.ar          = 0.8;       % AR para sigma univar (y/o para Minnesota base)
+specs.lambda1     = 0.1;       % overall tightness
+specs.lambda3     = 1;         % lag decay
+
+% Estimación MCMC (ajusta según tus necesidades)
+specs.ndraws      = 20000;     % draws totales
+specs.burnin      = 5000;      % burn-in
+specs.thin        = 1;         % thinning
+specs.pref        = 0;         % 0 = silencioso en consola; 1 = verboso
+
+% Opciones de salida
+specs.saveresults = 1;         % guardar resultados en archivos
+specs.results_subdir = 'results_bvar_2019m1_2023m12'; % subcarpeta dentro de la ruta de trabajo actual
+if ~exist(specs.results_subdir,'dir'); mkdir(specs.results_subdir); end
+
+% Método para sigma previo (cuando aplique): 1 = univariate AR
+% (En algunas versiones/casos lo controla BEAR según 'prior', lo dejamos explícito)
+specs.sigma_method = 1;
+
+% Chequeos de estabilidad, etc.
+specs.stability    = 1;        % calcular raíces y chequear estabilidad
+
+%% 4) Ejecutar BEAR en modo batch
+% Muchas instalaciones aceptan:
+%   [results, specs_out] = bear(Y, specs);
+% Otras usan:
+%   [results, specs_out] = bear(specs, Y);
+% Y otras sólo:
+%   [results, specs_out] = bear(specs); % si specs tiene ya los datos vía campos
+% Para máxima compatibilidad, pasamos Y y specs:
+[results, specs_out] = bear(Y, specs);
+
+%% 5) Guardar resultados .mat
+save(fullfile(specs.results_subdir,'workspace_results.mat'), 'results','specs_out','Y','varnames','T');
+
+%% 6) Ejemplos de acceso rápido a resultados en memoria
+% Coeficientes post. medios:
+% results.beta_median, results.beta_std, etc. según convención BEAR.
+% Matriz sigma post. media:
+% results.sigma
+% IRFs (si generadas):
+% results.IRF
+
+disp('--- BEAR BVAR batch finalizado. Revisa la carpeta de resultados. ---');
