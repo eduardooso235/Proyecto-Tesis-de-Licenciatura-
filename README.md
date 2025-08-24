@@ -1,2 +1,2 @@
 # Proyecto-Tesis-de-Licenciatura-
-Código de modelos usados en el trabajo de tesis para titulación de Licenciatura: Modelo DSGE Nuevo Keynesiano extraído de Gali 2015 (Dynare) y modelo BVAR con interfaz BEAR
+Código de modelos usados en el trabajo de tesis para titulación de Licenciatura: Modelo DSGE Nuevo Keynesiano extraído de Gali 2015 (Dynare) y modelo BVAR con interfaz BEAR, ambos calibrados de forma bayesiana mediante MCMC
