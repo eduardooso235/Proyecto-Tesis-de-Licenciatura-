@@ -1,108 +1,114 @@
-%% 2) Cargar datos (opción CSV)
-% Estructura esperada del CSV: date,pi,yhat,d_er,i
-% "date" como cadena 'YYYY-MM' o 'YYYYMmm'; ajusta parsing si difiere
-T = readtable(data_csv);
+% === VERSIÓN DESARROLLADOR MATLAB BEAR  =========================
+% Ruta a la carpeta donde está instalado la ToolBox BEAR
+BEAR_DIR = 'C:\ruta\a\BEARv5';         % <-- CAMBIE A SU DIRECCIÓN
 
-% Normalizar/parsear fechas si es necesario:
-% Si 'date' viene como '2019-01', usa:
-if ~isdatetime(T.date)
-    try
-        T.date = datetime(T.date, 'InputFormat','yyyy-MM'); % ajusta si tu formato difiere
-    catch
-        % Ejemplo alterno: '2019m1'
-        T.date = datetime(regexprep(string(T.date),'m','-'), 'InputFormat','yyyy-M');
-    end
+% Carpeta del proyecto BVAR
+PROJ_DIR = 'C:\ruta\a\mi_proyecto_bvar';  % <-- CAMBIE A SU DIRECCIÓN
+
+% Archivo de datos y variables endógenas (en el orden de Cholesky)
+DATA_FILE = fullfile(PROJ_DIR,'DATOS-TESIS.xlsx');  % <-- CAMBIE A SU ARCHIVO
+DATA_VAR  = {'pi','yhat','d_er','i'};               % <-- PONGA EL NOMBRE DE SUS VARIABLES
+
+% Fechas y frecuencia
+STARTDATE = '2019m1';
+ENDDATE   = '2023m12';
+FREQ      = 2;     % 1=trimestral, 2=mensual, 3=diaria, etc. 
+
+% Especificación BVAR( A SU CRITERIO)
+LAGS   = 4;        % número de rezagos
+IRFt   = 2;        % 2 = Cholesky
+PRIOR  = 2;        % 2 = Normal-Wishart (BEAR)
+AR     = 0.8;      % hiperparámetro ar
+L1     = 0.1;      % lambda1
+L3     = 1;        % lambda3
+
+% CARPETA DONDE ESTARÁN ALOJADOS SUS RESULTADOS
+RESULTS_DIR = fullfile(PROJ_DIR,'results_dev');
+if ~exist(RESULTS_DIR,'dir'); mkdir(RESULTS_DIR); end
+
+
+% BEAR - Developer Mode runner (sin GUI) (ESTO YA ES A ELECCIÓN DE CADA PERSONA SI USAR VERSIÓN DE DESARROLLADOR O USAR INTERFAZ DE DEFAULT
+clear; clc;
+
+% Carge su configuración editable
+bvar_dev_overrides;
+
+% Añada BEAR al path y vea a su proyecto
+addpath(genpath(BEAR_DIR));
+cd(PROJ_DIR);
+
+% -------------------------------------------------------------------------
+% 1) Carge una base de 'pref.mat' y sobreescriba campos
+%    (Use la pref de una corrida previa de la GUI o una plantilla suya)
+%    Si ya corrio GUI alguna vez en esta carpeta, habrá un pref.mat.
+% -------------------------------------------------------------------------
+if isfile(fullfile(PROJ_DIR,'pref.mat'))
+    S = load(fullfile(PROJ_DIR,'pref.mat'));   % debe traer struct 'pref'
+    pref = S.pref;
+else
+    % Si no tiene pref.mat aún, cree una estructura básica vacía.
+    % (BEAR llenará por defecto campos faltantes; mantener nombres estándar)
+    pref = struct();
 end
 
-% Ordenar por fecha por seguridad
-T = sortrows(T,'date');
+% -------------------------------------------------------------------------
+% 2) Sobrescribir parámetros clave del BVAR (solo si el campo existe o crearlo)
+%    Nota: algunos nombres/flags pueden variar entre versiones;
+%    por eso usamos 'isfield' y, si no existen, los creamos.
+% -------------------------------------------------------------------------
+pref.results_path      = RESULTS_DIR;
 
-% Filtrar rango muestral: 2019m1 -- 2023m12
-t0 = datetime(2019,1,1);
-t1 = datetime(2023,12,1);
-idx = (T.date>=t0 & T.date<=t1);
-T   = T(idx,:);
+pref.data_endo         = DATA_FILE;
+pref.data_endo_var     = DATA_VAR;
+pref.startdate         = STARTDATE;
+pref.enddate           = ENDDATE;
+pref.freq              = FREQ;
 
-% Construir matriz Y en el orden requerido por BEAR
-% Endógenas: pi, yhat, d_er, i  (en columnas)
-Y = [T.pi, T.yhat, T.d_er, T.i];
+pref.lags              = LAGS;      % número de rezagos
+pref.IRFt              = IRFt;      % identificación
+pref.prior             = PRIOR;     % 2 = Normal-Wishart
+pref.ar                = AR;
+pref.lambda1           = L1;
+pref.lambda3           = L3;
 
-% Nombres de variables
-varnames = {'pi','yhat','d_er','i'};
+% (Campos comunes de conveniencia; BEAR ignora los que no necesita)
+pref.const             = 1;         % incluir constante
+pref.const_exo         = 0;         % exógenas (aquí no usamos)
+pref.data_exo          = '';
+pref.data_exo_var      = {};
+pref.cband             = 0.68;      % banda por defecto para IRFs/tablas
 
-% Frecuencia (mensual = 12)
-freq = 12;
+% -------------------------------------------------------------------------
+% 3) Correr BEAR sin abrir la GUI
+%    IMPORTANTE: evite llamar a una variable 'results' (choca con toolboxes)
+% -------------------------------------------------------------------------
+disp('>> Corriendo BEAR (modo desarrollador, sin GUI)…');
+bear5(pref);               % No asignamos salida para evitar conflictos
 
-%% 3) Especificaciones (specs) para correr sin GUI
-% BEAR permite pasar un struct "specs" a la función principal.
-% Los nombres de campos son los típicos de BEAR v5 para VAR-Bayesian.
+% Al terminar, BEAR deja variables en el workspace y archivos en RESULTS_DIR
+disp('>> Terminó. Revise variables en el Workspace y la carpeta de resultados.');
 
-specs = struct();
+% -------------------------------------------------------------------------
+% 4) Ejemplos de post-proceso (si las variables existen)
+% -------------------------------------------------------------------------
+% IRFs (algunas versiones exportan IRFs a variables tipo IRF_record)
+if evalin('base','exist(''IRF_record'',''var'')')
+    IRF_record = evalin('base','IRF_record');  %#ok<NASGU>
+    save(fullfile(RESULTS_DIR,'IRF_record.mat'),'IRF_record');
+end
 
-% Datos y básicos
-specs.modeltype   = 'VAR';     % Tipo de modelo
-specs.frequency   = freq;      % 12 mensual, 4 trimestral, etc.
-specs.varendo     = varnames;  % celdas con nombres endógenos
-specs.varexo      = {};        % sin exógenas
-specs.const       = 1;         % incluir constante (1 sí, 0 no)
-specs.nlag        = 4;         % rezagos
+% Coeficientes muestreados (beta_gibbs) si existe:
+if evalin('base','exist(''beta_gibbs'',''var'')')
+    beta_gibbs = evalin('base','beta_gibbs');  %#ok<NASGU>
+    save(fullfile(RESULTS_DIR,'beta_gibbs.mat'),'beta_gibbs');
+end
 
-% Muestra (opcional pero útil para etiquetas)
-specs.startdate   = '2019-01'; % cadena legible por BEAR para etiquetas
-specs.enddate     = '2023-12';
+% Matrices estructurales D_record (si existe):
+if evalin('base','exist(''D_record'',''var'')')
+    D_record = evalin('base','D_record');      %#ok<NASGU>
+    save(fullfile(RESULTS_DIR,'D_record.mat'),'D_record');
+end
 
-% Identificación estructural / IRFs
-specs.IRFt        = 2;         % 2 = Cholesky
-specs.Fcomp       = 1;         % construir F companion (suele ser default)
-specs.IRFperiods  = 20;        % horizontes IRF (ajusta a gusto)
-specs.FEVperiods  = 20;        % horizontes FEVD (ajusta a gusto)
+disp('>> Post-proceso mínimo guardado en IRF_record.mat / beta_gibbs.mat / D_record.mat (si existían).');
 
-% Prior bayesiano
-% En BEAR v5, para BVAR:
-% prior = 1 Minnesota, 2 Normal-Wishart, 3 Indep. Normal-Wishart, etc. (*puede variar*)
-specs.prior       = 2;         % Normal-Wishart
-% Hiperparámetros
-specs.ar          = 0.8;       % AR para sigma univar (y/o para Minnesota base)
-specs.lambda1     = 0.1;       % overall tightness
-specs.lambda3     = 1;         % lag decay
 
-% Estimación MCMC (ajusta según tus necesidades)
-specs.ndraws      = 20000;     % draws totales
-specs.burnin      = 5000;      % burn-in
-specs.thin        = 1;         % thinning
-specs.pref        = 0;         % 0 = silencioso en consola; 1 = verboso
-
-% Opciones de salida
-specs.saveresults = 1;         % guardar resultados en archivos
-specs.results_subdir = 'results_bvar_2019m1_2023m12'; % subcarpeta dentro de la ruta de trabajo actual
-if ~exist(specs.results_subdir,'dir'); mkdir(specs.results_subdir); end
-
-% Método para sigma previo (cuando aplique): 1 = univariate AR
-% (En algunas versiones/casos lo controla BEAR según 'prior', lo dejamos explícito)
-specs.sigma_method = 1;
-
-% Chequeos de estabilidad, etc.
-specs.stability    = 1;        % calcular raíces y chequear estabilidad
-
-%% 4) Ejecutar BEAR en modo batch
-% Muchas instalaciones aceptan:
-%   [results, specs_out] = bear(Y, specs);
-% Otras usan:
-%   [results, specs_out] = bear(specs, Y);
-% Y otras sólo:
-%   [results, specs_out] = bear(specs); % si specs tiene ya los datos vía campos
-% Para máxima compatibilidad, pasamos Y y specs:
-[results, specs_out] = bear(Y, specs);
-
-%% 5) Guardar resultados .mat
-save(fullfile(specs.results_subdir,'workspace_results.mat'), 'results','specs_out','Y','varnames','T');
-
-%% 6) Ejemplos de acceso rápido a resultados en memoria
-% Coeficientes post. medios:
-% results.beta_median, results.beta_std, etc. según convención BEAR.
-% Matriz sigma post. media:
-% results.sigma
-% IRFs (si generadas):
-% results.IRF
-
-disp('--- BEAR BVAR batch finalizado. Revisa la carpeta de resultados. ---');
